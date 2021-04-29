@@ -1,0 +1,108 @@
+---
+title: "wqpl_4_29_21"
+author: "deving"
+date: "4/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+rm(list = ls())
+
+
+library(sjmisc)
+library(ggplot2)
+library(gridExtra)
+library(tidyverse)
+library(data.table)
+library(dplyr)
+library(naniar)
+library(ggpubr)
+library(PairedData)
+library(glmmTMB)
+library(stringr)
+library(lubridate)
+library(roperators)
+
+
+top_canopy<-read.csv("top_canopy4.csv")
+top_canopy<-top_canopy %>% replace_with_na_all(condition = ~.x == 999)
+top_canopy<-top_canopy %>% replace_with_na_all(condition = ~.x == "miss")
+top_canopy<-unite(top_canopy, "date", "smo", "sday", "syr", remove=TRUE)
+top_canopy$date <- str_replace_all(top_canopy$date, fixed("_"), "/")
+top_canopy$"species"<-NULL
+top_canopy$"start"<-NULL
+top_canopy$"stop"<-NULL
+top_canopy<-top_canopy %>%
+  group_by(transect,date) %>%
+  summarize_all(~ max(as.character(.), na.rm = TRUE)) %>%
+  ungroup
+tc<-top_canopy
+
+tc$juas.cover <- apply(tc, 1, function(x) length(which(x=="juas")))*0.5
+tc$qufu.cover <- apply(tc, 1, function(x) length(which(x=="qufu")))*0.5
+tc$ulcr.cover <- apply(tc, 1, function(x) length(which(x=="ulcr")))*0.5
+tc$dite.cover <- apply(tc, 1, function(x) length(which(x=="dite")))*0.5
+tc$sose.cover <- apply(tc, 1, function(x) length(which(x=="sose")))*0.5
+tc$ilvo.cover <- apply(tc, 1, function(x) length(which(x=="ilvo")))*0.5
+tc$eyte.cover <- apply(tc, 1, function(x) length(which(x=="eyte")))*0.5
+tc$wood.cover <- apply(tc, 1, function(x) length(which(x!="")))*0.5
+
+tc <- subset(tc, select=c("transect","date", "juas.cover", "qufu.cover", "ulcr.cover", "dite.cover", "sose.cover", "ilvo.cover", "eyte.cover", "wood.cover"))
+
+tc$date <- mdy(tc$date)
+
+tc <- arrange(tc, transect, date)
+
+tc_c <- tc %>% group_by(transect) %>% mutate(row_number())
+
+tc_c <- tc_c %>% rename(ob = "row_number()")
+
+tc <- tc_c[,c(1,2,11,3:10)]
+
+th<-read.csv("tr_history.csv")
+
+th$trdate <- mdy(th$trdate)
+
+th <- filter(th, trmod1 %in% c("t", "s", "w", "h"))
+
+th <- th %>% rename(tr = "trmod1")
+
+th <- arrange(th, transect, trdate)
+
+temp <- subset(tc, select=c("transect", "date"))
+
+temp <- arrange(temp, transect, date)
+
+temp <- merge(temp, th, by="transect")
+
+temp$dif <- temp$trdate-temp$date
+
+temp <- filter(temp, dif<=0)
+
+#this next step seems nesasary in order to create cum_t
+temp <- subset(temp, select= -c(trdate))
+
+temp_p <- pivot_wider(temp, names_from = "dif", values_from = "tr")
+
+#the treatment order is subtly incorrect in the cum_t variable created here
+temp_p <- unite(temp_p, cum_t, 3:251, remove = TRUE)
+
+#we lose rest periods here that are not preceded by treatments
+temp_p$cum_t <- temp_p$cum_t %-% '[_,NA]'
+
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+
+temp_p$last_t <- substrRight(temp_p$cum_t, 1)
+
+temp_p <- temp_p %>% 
+  group_by(transect) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(rest = as.numeric((cum_t == lag(cum_t,1))))
+
+view(temp_p)
+
+?mutate
